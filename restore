@@ -1,0 +1,58 @@
+#!/bin/bash
+
+#checks if .restoreinfo exists 
+if [ ! -e ~/.restore.info ]
+then
+	echo ".restoreinfo file doesn't exist. Nothing to restore."
+	exit 1
+fi
+#checks to make sure there is only one argument
+if [ $# -ne 1 ]
+then
+	echo "Invalid input arguments. Terminating."
+	exit 2
+fi
+#checks if file exists in the .restoreinfo
+if [ ! $(fgrep -w $1 ~/.restore.info) ]
+then	
+	echo "$1 does not exist in the .restore.info file."
+	exit 3
+else
+	entry="$(fgrep -w $1 ~/.restore.info)"
+fi
+#renaming file to original name
+filename="$(echo $1 | cut -d"_" -f1)"
+pathlen=$(echo "$entry" | cut -d":" -f2 | tr "/" " " | wc -w)
+oriPath=$(echo "$entry" | cut -d":" -f2 | cut -d"/" -f 1-$pathlen)
+mv ~/deleted/$1 ~/deleted/$filename
+#checks if path still exists
+if [ -e $oriPath ]
+then
+	#if path exist, check if file with same name exists
+	if [ -e "$oriPath/$filename" ]
+	then
+		#prompt user if they want to overwrite
+		read -p "Do you want to overwrite? Y/N? " choice
+		choice=$(echo "$choice" | tr [A-Z] [a-z])
+		case "$choice" in
+			y) echo "$filename is restored."
+				mv ~/deleted/$filename $oriPath;;
+			yes) echo "$filename is restored."
+				mv ~/deleted/$filename $oriPath;;
+			*)	echo "$filename was not restored."
+				#if not restored, revert name change
+				mv ~/deleted/$filename ~/deleted/$1
+				exit;;
+		esac
+	else
+		echo "$filename is restored."
+		mv ~/deleted/$filename $oriPath
+	fi 
+else 
+	mkdir -p $oriPath
+	echo "$filename is restored."
+	mv ~/deleted/$filename $oriPath
+fi 
+#remove entry in .restore.info
+fgrep -v "$entry" ~/.restore.info >> ~/.temp
+mv ~/.temp ~/.restore.info

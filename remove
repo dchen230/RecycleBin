@@ -1,0 +1,177 @@
+#!/bin/bash
+
+#checks if deleted directory exists
+function checkDel(){
+	if [ ! -d ~/deleted ]
+	then
+		mkdir ~/deleted
+	fi
+}
+#checks for iv options and helps set the delete flag. flag is true by default
+function ifoptiv(){	
+	if [ "$opti" = true ]
+	then
+		read -p "Do you want to delete $1? Y/N " choice
+		choice=$(echo "$choice" | tr [A-Z] [a-z])
+		case "$choice" in
+			n) isDel=false;;
+			no) isDel=false;;
+			y) isDel=true;;
+			yes) isDel=true;;
+			*) echo "Invalid choice. Terminating."
+				exit 4;;
+		esac
+	fi
+	if [ "$optv" = true ]
+	then	
+		if [[ "$choice" = "n" || "$choice" = "no" ]]
+		then	
+			echo "$1 has not been deleted."
+		else
+			isDel=true
+			echo "$1 has been deleted."
+		fi
+	fi
+}
+#helps log deletion into .restore.info and also renames and mvs files into deleted directory
+function mvlog(){
+	local fnode="_$(ls -i $1 | cut -d" " -f1)"
+	mv "$1" "${1}${fnode}"
+	restoretxt="$restoretxt ${2}${fnode}:${1}"
+	mv "${1}${fnode}" ~/deleted
+	let filesDeleted+=1
+}
+#main function used for removing files and directories
+function removeFiles(){
+	for file in $@
+	do	
+		#checks file to see if it exists, and if its name is remove
+		if [ ! -e $file ]
+		then
+			echo "rm: cannot remove '${file}': No such file or directory"
+			continue
+		fi
+		if [ $file = "remove" ]
+		then 
+			echo "Attempting to delete remove - operation aborted"
+			exit 99
+		fi
+		local absPath=""
+		#if file is passed via filename or absPath
+		if [ $(echo $file | cut -c 1) = "/" ]
+		then	
+			absPath=$file
+		else 
+			absPath=$(echo "$(pwd $file)/$(basename $file)")
+		fi
+		local bName="$(basename $absPath)"
+		#if file is a directory and r option is off, continue to next file
+		if [ -d $absPath ]
+		then
+			if [ "$optr" = false ]
+			then
+				echo "rm: cannot remove '$file': Is a directory"
+				continue
+			#otherwise we check vi options, if it is off we will delete folder
+			else
+				echo "$file is a directory and -r option is enabled"
+				ifoptiv $absPath
+				#if vi is on, and user says Y then we delete, else we just continue on
+				if [ "$isDel" = true ]
+				then 
+					removeFilesR $absPath
+				fi	
+			fi
+		#if file is not a directory, check if it is a file
+		elif [ -f $absPath ]
+		then
+			#check for vi options, if no vi options, file will be deleted by default
+			ifoptiv $absPath
+			if [ "$isDel" = true ]
+			then
+				mvlog $absPath $bName
+			fi
+		fi
+	done
+}
+#function for removing directories
+function removeFilesR(){
+	#find all files in dir
+	local myfiles=$(find $1)
+	if [ $(echo "$myfiles" | fgrep -w "remove") ]
+	then
+		echo "Folder contains remove - operation aborted"
+		exit 99
+	fi
+	#if dir is empty, remove
+	local totalfiles=$(echo -n "$myfiles" | wc -w)
+	if [ $totalfiles -eq 1 ]
+	then
+		rmdir $1
+	else
+		myfiles=$(echo $myfiles | cut -d" " -f2-)
+		#check if file is dir or file
+		for dirfile in $myfiles
+		do
+			#if it is file, delete
+			if [ -f $dirfile ]
+			then
+				mvlog $dirfile $(basename $dirfile)
+			#if it is dir, call removeFilesR on it
+			elif [ -d $dirfile ]
+			then
+				removeFilesR $dirfile
+			fi
+		done
+		#when we are finished looping through the dir files, we now delete empty dir
+		rmdir $1
+	fi
+}
+
+#options
+optv=false
+opti=false
+optr=false
+#marks a file for deletion 
+isDel=true
+#keeps track on whether a file has been removed or not
+filesDeleted=0
+
+#MAIN
+#check for empty args
+if [ $# -eq 0 ]
+then
+	echo "missing operand"
+	echo "Try 'rm --help' for more information."
+	exit 1
+fi
+#get options
+while getopts vir opt
+do
+	case $opt in
+		v)	optv=true;;
+		i)	opti=true;;
+		r)	optr=true;;
+		*)	echo "rm: invalid option '$opt'"
+			echo "Try 'rm --help' for more information."
+			exit;;
+	esac
+done
+shift $[$OPTIND-1]
+#checks again if user put in options but no arguments to follow up
+if [ $# -eq 0 ]
+then
+	echo "missing operand"
+	echo "Try 'rm --help' for more information."
+	exit 1
+fi
+#check if ~/deleted exists
+checkDel
+#stores info on deleted files to write to .restore.info
+restoretxt=""
+removeFiles $@
+#if files were removed, update .restore.info file
+if [ $filesDeleted -gt 0 ]
+then
+	echo "$restoretxt" | tr " " "\n" >> ~/.restore.info
+fi 
